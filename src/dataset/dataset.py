@@ -12,8 +12,8 @@ class GPTDatasetV1(Dataset):
         for i in range(0, len(token_ids) - max_length, stride):
             input_chunk = token_ids[i:i + max_length]
             target_chunk = token_ids[i+1:i + max_length + 1]
-            self.input_ids.append(input_chunk)
-            self.target_ids.append(target_chunk)
+            self.input_ids.append(torch.tensor(input_chunk))
+            self.target_ids.append(torch.tensor(target_chunk))
     
     def __len__(self):
         return len(self.input_ids)
