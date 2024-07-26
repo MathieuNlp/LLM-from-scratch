@@ -130,7 +130,7 @@ class TransformerBlock(nn.Module):
         return x
 
 
-class GPTModel(nn.Module):
+class GPT(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.tok_emb = nn.Embedding(cfg["vocab_size"], cfg["emb_dim"])
@@ -185,7 +185,7 @@ class GPTModel(nn.Module):
         }
         BASE_CONFIG.update(model_configs[model_type])
 
-        gpt = GPT2Model(BASE_CONFIG)
+        gpt = GPT(BASE_CONFIG)
         gpt.eval()
 
         gpt_hf = GPT2Model.from_pretrained(model_names[model_type], cache_dir="checkpoints")
@@ -196,7 +196,7 @@ class GPTModel(nn.Module):
         gpt.pos_emb.weight = assign_check(gpt.pos_emb.weight, d["wpe.weight"])
         gpt.tok_emb.weight = assign_check(gpt.tok_emb.weight, d["wte.weight"])
         
-        for b in range(gpt.cfg["n_layers"]):
+        for b in range(BASE_CONFIG["n_layers"]):
             q_w, k_w, v_w = np.split(d[f"h.{b}.attn.c_attn.weight"], 3, axis=-1)
             gpt.trf_blocks[b].att.W_query.weight = assign_check(gpt.trf_blocks[b].att.W_query.weight, q_w.T)
             gpt.trf_blocks[b].att.W_key.weight = assign_check(gpt.trf_blocks[b].att.W_key.weight, k_w.T)
@@ -229,4 +229,4 @@ class GPTModel(nn.Module):
     
 if __name__ == "__main__":
     model_type = "gpt2-small (124M)"
-    gpt = GPTModel.load_weights(model_type)
+    gpt = GPT.load_weights(model_type)
