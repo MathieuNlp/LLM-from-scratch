@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import numpy as np
+from utils import assign_check
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_in, d_out, context_length, dropout, num_heads, qkv_bias=False):
@@ -151,3 +153,80 @@ class GPTModel(nn.Module):
         x = self.final_norm(x)
         logits = self.out_head(x)
         return logits
+    
+    @classmethod
+    def load_weights(cls, model_type):
+        """Loads pretrained GPT-2 model wrights from huggingface"""
+        
+        model_names = {
+            "gpt2-small (124M)": "openai-community/gpt2",
+            "gpt2-medium (355M)": "openai-community/gpt2-medium",
+            "gpt2-large (774M)": "openai-community/gpt2-large",
+            "gpt2-xl (1558M)": "openai-community/gpt2-xl"
+        }
+
+
+        assert model_type in model_names.keys()
+        from transformers import GPT2Model
+        print("Loading weights from pretrained GPT: %s" % model_type)
+
+        model_configs = {
+            "gpt2-small (124M)": {"emb_dim": 768, "n_layers": 12, "n_heads": 12},
+            "gpt2-medium (355M)": {"emb_dim": 1024, "n_layers": 24, "n_heads": 16},
+            "gpt2-large (774M)": {"emb_dim": 1280, "n_layers": 36, "n_heads": 20},
+            "gpt2-xl (1558M)": {"emb_dim": 1600, "n_layers": 48, "n_heads": 25},
+        }
+
+        BASE_CONFIG = {
+            "vocab_size": 50257,    # Vocabulary size
+            "context_length": 1024, # Context length
+            "drop_rate": 0.0,       # Dropout rate
+            "qkv_bias": True        # Query-key-value bias
+        }
+        BASE_CONFIG.update(model_configs[model_type])
+
+        gpt = GPT2Model(BASE_CONFIG)
+        gpt.eval()
+
+        gpt_hf = GPT2Model.from_pretrained(model_names[model_type], cache_dir="checkpoints")
+        gpt_hf.eval()
+
+        d = gpt_hf.state_dict()
+
+        gpt.pos_emb.weight = assign_check(gpt.pos_emb.weight, d["wpe.weight"])
+        gpt.tok_emb.weight = assign_check(gpt.tok_emb.weight, d["wte.weight"])
+        
+        for b in range(gpt.cfg["n_layers"]):
+            q_w, k_w, v_w = np.split(d[f"h.{b}.attn.c_attn.weight"], 3, axis=-1)
+            gpt.trf_blocks[b].att.W_query.weight = assign_check(gpt.trf_blocks[b].att.W_query.weight, q_w.T)
+            gpt.trf_blocks[b].att.W_key.weight = assign_check(gpt.trf_blocks[b].att.W_key.weight, k_w.T)
+            gpt.trf_blocks[b].att.W_value.weight = assign_check(gpt.trf_blocks[b].att.W_value.weight, v_w.T)
+        
+            q_b, k_b, v_b = np.split(d[f"h.{b}.attn.c_attn.bias"], 3, axis=-1)
+            gpt.trf_blocks[b].att.W_query.bias = assign_check(gpt.trf_blocks[b].att.W_query.bias, q_b)
+            gpt.trf_blocks[b].att.W_key.bias = assign_check(gpt.trf_blocks[b].att.W_key.bias, k_b)
+            gpt.trf_blocks[b].att.W_value.bias = assign_check(gpt.trf_blocks[b].att.W_value.bias, v_b)
+        
+        
+            gpt.trf_blocks[b].att.out_proj.weight = assign_check(gpt.trf_blocks[b].att.out_proj.weight, d[f"h.{b}.attn.c_proj.weight"].T)
+            gpt.trf_blocks[b].att.out_proj.bias = assign_check(gpt.trf_blocks[b].att.out_proj.bias, d[f"h.{b}.attn.c_proj.bias"])
+        
+            gpt.trf_blocks[b].ff.layers[0].weight = assign_check(gpt.trf_blocks[b].ff.layers[0].weight, d[f"h.{b}.mlp.c_fc.weight"].T)
+            gpt.trf_blocks[b].ff.layers[0].bias = assign_check(gpt.trf_blocks[b].ff.layers[0].bias, d[f"h.{b}.mlp.c_fc.bias"])
+            gpt.trf_blocks[b].ff.layers[2].weight = assign_check(gpt.trf_blocks[b].ff.layers[2].weight, d[f"h.{b}.mlp.c_proj.weight"].T)
+            gpt.trf_blocks[b].ff.layers[2].bias = assign_check(gpt.trf_blocks[b].ff.layers[2].bias, d[f"h.{b}.mlp.c_proj.bias"])
+        
+            gpt.trf_blocks[b].norm1.scale = assign_check(gpt.trf_blocks[b].norm1.scale, d[f"h.{b}.ln_1.weight"])
+            gpt.trf_blocks[b].norm1.shift = assign_check(gpt.trf_blocks[b].norm1.shift, d[f"h.{b}.ln_1.bias"])
+            gpt.trf_blocks[b].norm2.scale = assign_check(gpt.trf_blocks[b].norm2.scale, d[f"h.{b}.ln_2.weight"])
+            gpt.trf_blocks[b].norm2.shift = assign_check(gpt.trf_blocks[b].norm2.shift, d[f"h.{b}.ln_2.bias"])
+        
+            gpt.final_norm.scale = assign_check(gpt.final_norm.scale, d[f"ln_f.weight"])
+            gpt.final_norm.shift = assign_check(gpt.final_norm.shift, d[f"ln_f.bias"])
+            gpt.out_head.weight = assign_check(gpt.out_head.weight, d["wte.weight"])
+
+        return gpt
+    
+if __name__ == "__main__":
+    model_type = "gpt2-small (124M)"
+    gpt = GPTModel.load_weights(model_type)
